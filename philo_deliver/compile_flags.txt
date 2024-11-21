@@ -1,4 +1,0 @@
--Iincludes
--Wall
--Werror
--Wextra
