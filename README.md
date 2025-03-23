@@ -1,5 +1,7 @@
 # Philosophers
 
+![table](./scheme.png)
+
 ## Overview
 My implementation of the classic dining philosophers problem using threads and mutexes.
 
