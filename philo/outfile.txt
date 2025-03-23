@@ -1,0 +1,665 @@
+// Project Source Code - Comments Removed
+// Generated on: dom 23 mar 2025 15:53:10 WET
+
+
+
+// ========== ./00_main.c ==========
+
+#include "philo.h"
+static int	ft_mtx_the_game_is_over(t_args *d, pthread_t *monitor)
+{
+	pthread_mutex_lock(&d->mtx_finish_dinner);
+	if (d->finish_dinner == TRUE)
+	{
+		pthread_mutex_unlock(&d->mtx_finish_dinner);
+		pthread_join(*monitor, NULL);
+		return (TRUE);
+	}
+	pthread_mutex_unlock(&d->mtx_finish_dinner);
+	return (FALSE);
+}
+static void	ft_start_monitor(t_args *d)
+{
+	pthread_t	monitor;
+	pthread_create(&monitor, NULL, &ft_monitor, (void *)d);
+	while (1)
+	{
+		if (ft_mtx_the_game_is_over(d, &monitor) == TRUE)
+			break ;
+		usleep (500);
+	}
+}
+int	main(int ac, char **av)
+{
+	t_args		d;
+	t_philo		**ph;
+	if (ft_first_args_check_have_error(ac, av) == TRUE)
+		return (1);
+	if (ft_parse_data_and_check_error(av, &d) == TRUE)
+		return (2);
+	if (d.nb_philos == 0 || d.nb_must_eat == 0)
+		return (0);
+	ph = ft_create_philos_mem(&d);
+	if (!ph && d.nb_philos > 0)
+		return (printf("Error: Can't create Philosophers memory!\n"), 3);
+	d.ph = (void **)ph;
+	ft_mutex_init(ph, &d);
+	ft_align_forks(ph, &d);
+	ft_let_the_game_begin(ph, &d);
+	usleep (500);
+	ft_start_monitor(&d);
+	usleep(500);
+	ft_mutex_destroy(ph, &d);
+	ft_free_philo_mem(ph, &d);
+	return (0);
+}
+
+
+// ========== ./01_init.c ==========
+
+#include "philo.h"
+void	ft_init_variables(t_args *d)
+{
+	d->nb_philos = 0;
+	d->forks = 0;
+	d->time_to_die = 0;
+	d->time_to_eat = 0;
+	d->time_to_sleep = 0;
+	d->nb_must_eat = 0;
+	d->is_died = 0;
+	d->error_philo = 0;
+	d->all_eaten = 0;
+	d->finish_dinner = 0;
+	d->all_tds_running = 0;
+}
+
+
+// ========== ./11_first_args_check.c ==========
+
+#include "philo.h"
+static int	ft_have_only_digits_in_numbers(char **av)
+{
+	int	i;
+	int	j;
+	i = 0;
+	while (av[++i])
+	{
+		j = -1;
+		while (av[i][++j])
+		{
+			while (av[i][j] == '+')
+				j++;
+			if (ft_isdigit(av[i][j]) == FALSE)
+				return (FALSE);
+		}
+	}
+	return (TRUE);
+}
+int	ft_first_args_check_have_error(int ac, char **av)
+{
+	int	rt;
+	rt = 0;
+	if (ac < 5 || ac > 6)
+		rt = printf("\nNumber of arguments incorrect!\n");
+	else if (ft_have_only_digits_in_numbers(av) == FALSE)
+		rt = printf("\nPlease, only numbers (not negative) on arguments!\n");
+	if (rt > 0)
+		return (ft_print_user_manual(), TRUE);
+	else
+		return (FALSE);
+}
+
+
+// ========== ./21_parse_data.c ==========
+
+#include "philo.h"
+void	ft_convert_user_input_to_long_vars(char **av, t_args *d)
+{
+	d->nb_philos = ft_atol_positive(av[1]);
+	d->time_to_die = ft_atol_positive(av[2]);
+	d->time_to_eat = ft_atol_positive(av[3]);
+	d->time_to_sleep = ft_atol_positive(av[4]);
+	if (av[5])
+		d->nb_must_eat = ft_atol_positive(av[5]);
+	else
+		d->nb_must_eat = -1;
+}
+void	ft_check_if_have_bigger_than_int_max(t_args *d)
+{
+	if (d->nb_philos > INT_MAX)
+		d->error_philo = (1 << 5) | d->error_philo;
+	if (d->time_to_die > INT_MAX)
+		d->error_philo = (1 << 4) | d->error_philo;
+	if (d->time_to_eat > INT_MAX)
+		d->error_philo = (1 << 3) | d->error_philo;
+	if (d->time_to_sleep > INT_MAX)
+		d->error_philo = (1 << 2) | d->error_philo;
+	if (d->nb_must_eat > INT_MAX)
+		d->error_philo = 1 | d->error_philo;
+}
+void	ft_print_what_happen(int error)
+{
+	printf("\nYou have error on some input(s):\n\n");
+	if (((error >> 5) & 1) == TRUE)
+		printf("	=> number_of_philosophers\n");
+	if (((error >> 4) & 1) == TRUE)
+		printf("	=> time_to_die\n");
+	if (((error >> 3) & 1) == TRUE)
+		printf("	=> time_to_eat\n");
+	if (((error >> 2) & 1) == TRUE)
+		printf("	=> time_to_sleep\n");
+	if ((error & 1) == TRUE)
+		printf("	=> number_of_times_each_philosopher_must_eat\n");
+	printf("\nYou tried higher than INT_MAX due(s) on above list.\n");
+	ft_print_user_manual();
+}
+int	ft_parse_data_and_check_error(char **av, t_args *d)
+{
+	ft_init_variables(d);
+	ft_convert_user_input_to_long_vars(av, d);
+	ft_check_if_have_bigger_than_int_max(d);
+	if (d->error_philo >= TRUE)
+		return (ft_print_what_happen(d->error_philo), TRUE);
+	return (FALSE);
+}
+
+
+// ========== ./31_create_philos_mem.c ==========
+
+#include "philo.h"
+void	ft_init_philo_vars(t_philo **ph, t_args *d, size_t i)
+{
+	ph[i]->last_meal = d->start_time;
+	ph[i]->d = d;
+	ph[i]->index = i;
+	ph[i]->id = i + 1;
+	ph[i]->n_meals = 0;
+	ph[i]->eating_done = 0;
+	ph[i]->max_meals = d->nb_must_eat;
+	ph[i]->n_philos = d->nb_philos;
+	if (ph[i]->id % 2 != 0)
+		ph[i]->start_delay = 90;
+	else
+		ph[i]->start_delay = 0;
+	ph[i]->usleep_done = TRUE;
+}
+t_philo	**ft_create_philos_mem(t_args *d)
+{
+	t_philo	**ph;
+	size_t	i;
+	ph = (t_philo **)malloc(sizeof(t_philo *) * d->nb_philos);
+	if (!ph)
+		return (NULL);
+	i = 0;
+	while (i < d->nb_philos)
+	{
+		ph[i] = malloc(sizeof(t_philo) * 1);
+		if (!ph[i])
+		{
+			while (i-- > 0)
+				free(ph[i]);
+			free(ph);
+			return (NULL);
+		}
+		ft_init_philo_vars(ph, d, i);
+		i++;
+	}
+	return (ph);
+}
+
+
+// ========== ./35_align_forks.c ==========
+
+#include "philo.h"
+static void	ft_align_forks_for_even_philo(t_philo **ph, t_args *d, size_t i)
+{
+	ph[i]->first_fork = &d->mtx_fork[i];
+	if (i == d->nb_philos - 1)
+		ph[i]->second_fork = &d->mtx_fork[0];
+	else
+		ph[i]->second_fork = &d->mtx_fork[i + 1];
+}
+static void	ft_align_forks_for_odd_philo(t_philo **ph, t_args *d, size_t i)
+{
+	if (i == d->nb_philos - 1)
+		ph[i]->first_fork = &d->mtx_fork[0];
+	else
+		ph[i]->first_fork = &d->mtx_fork[i + 1];
+	ph[i]->second_fork = &d->mtx_fork[i];
+}
+int	ft_align_forks(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	i = 0;
+	if (d->nb_philos == 1)
+	{
+		ph[0]->first_fork = &d->mtx_fork[0];
+		return (TRUE);
+	}
+	while (i < d->nb_philos)
+	{
+		if (ph[i]->id % 2 == 0)
+			ft_align_forks_for_even_philo(ph, d, i);
+		else
+			ft_align_forks_for_odd_philo(ph, d, i);
+		i++;
+	}
+	return (TRUE);
+}
+
+
+// ========== ./41_let_the_game_begin.c ==========
+
+#include "philo.h"
+#include <pthread.h>
+static void	*ft_philo_dinner_plan(void *arg)
+{
+	t_philo		*ph;
+	ph = (t_philo *)arg;
+	while (1)
+		if (ft_mtx_are_all_threads_running(ph) == TRUE)
+			break ;
+	usleep(ph->start_delay);
+	while (ph->n_meals != ph->d->nb_must_eat
+		|| ft_mtx_have_died_philo(ph) == FALSE)
+	{
+		ft_mtx_take_forks(ph);
+		ft_mtx_save_meal_time(ph);
+		ft_log(ph, S_EATING, ph->index);
+		ph->usleep_done = ft_mtx_is_usleep_loop_done(ph, ph->d->time_to_eat);
+		ft_mtx_leave_forks(ph);
+		if (ph->usleep_done == FALSE
+			|| (ph->max_meals > 0 && ft_mtx_have_reached_max_meals(ph) == TRUE))
+			break ;
+		ft_log(ph, S_SLEEPING, ph->index);
+		if (ft_mtx_is_usleep_loop_done(ph, ph->d->time_to_sleep) == FALSE)
+			break ;
+		ft_log(ph, S_THINKING, ph->index);
+		usleep(350);
+	}
+	return (NULL);
+}
+static void	*ft_one_philo_case(void *arg)
+{
+	t_philo	*ph;
+	ph = (t_philo *)arg;
+	pthread_mutex_lock(ph->first_fork);
+	ft_log(ph, S_FORK, 1);
+	pthread_mutex_unlock(ph->first_fork);
+	return (NULL);
+}
+int	ft_let_the_game_begin(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	i = 0;
+	d->start_time = ft_get_time();
+	if (d->nb_philos == 0 || d->nb_must_eat == 0)
+		return (FALSE);
+	else if (d->nb_philos == 1)
+	{
+		ph[0]->last_meal = ft_get_time();
+		pthread_create(&(ph[0]->td), NULL,
+			&ft_one_philo_case, (void *)ph[0]);
+	}
+	else
+	{
+		while (i < d->nb_philos)
+		{
+			pthread_create(&(ph[i]->td), NULL,
+				&ft_philo_dinner_plan, (void *)ph[i]);
+			i++;
+		}
+		ft_set_start_time(d, ph);
+		ft_mtx_increase_created_threads(d);
+	}
+	return (TRUE);
+}
+
+
+// ========== ./42_set_start_time.c ==========
+
+#include "philo.h"
+void	ft_set_start_time(t_args *d, t_philo **ph)
+{
+	size_t	i;
+	size_t	nb_philos;
+	size_t	start_time;
+	i = 0;
+	nb_philos = d->nb_philos;
+	start_time = ft_get_time();
+	d->start_time = start_time;
+	while (i < nb_philos)
+		ph[i++]->last_meal = start_time;
+}
+
+
+// ========== ./43_mtx_fts_all_tds_running.c ==========
+
+#include "philo.h"
+int	ft_mtx_are_all_threads_running(t_philo *ph)
+{
+	usleep(10);
+	pthread_mutex_lock(&ph->d->mtx_all_tds_running);
+	if (ph->d->all_tds_running == TRUE)
+	{
+		pthread_mutex_unlock(&ph->d->mtx_all_tds_running);
+		return (TRUE);
+	}
+	pthread_mutex_unlock(&ph->d->mtx_all_tds_running);
+	return (FALSE);
+}
+void	ft_mtx_increase_created_threads(t_args *d)
+{
+	pthread_mutex_lock(&d->mtx_all_tds_running);
+	d->all_tds_running = TRUE;
+	pthread_mutex_unlock(&d->mtx_all_tds_running);
+}
+
+
+// ========== ./44_mtx_fts_forks.c ==========
+
+#include "philo.h"
+void	ft_mtx_take_forks(t_philo *ph)
+{
+	pthread_mutex_lock(ph->first_fork);
+	ft_log(ph, S_FORK, ph->index);
+	pthread_mutex_lock(ph->second_fork);
+	ft_log(ph, S_FORK, ph->index);
+}
+void	ft_mtx_leave_forks(t_philo *ph)
+{
+	pthread_mutex_unlock(ph->second_fork);
+	pthread_mutex_unlock(ph->first_fork);
+}
+
+
+// ========== ./45_mtx_save_meal_time.c ==========
+
+#include "philo.h"
+void	ft_mtx_save_meal_time(t_philo *ph)
+{
+	pthread_mutex_lock(&ph->mtx_philo);
+	ph->last_meal = ft_get_time();
+	pthread_mutex_unlock(&ph->mtx_philo);
+	ph->n_meals++;
+}
+
+
+// ========== ./46_mtx_have_reached_max_meals.c ==========
+
+#include "philo.h"
+int	ft_mtx_have_reached_max_meals(t_philo *ph)
+{
+	if (ph->n_meals == ph->max_meals)
+	{
+		pthread_mutex_lock(&ph->mtx_eat_done);
+		ph->eating_done = TRUE;
+		pthread_mutex_unlock(&ph->mtx_eat_done);
+		return (TRUE);
+	}
+	return (FALSE);
+}
+
+
+// ========== ./49_monitor.c ==========
+
+#include "philo.h"
+int	ft_mtx_all_philos_eaten_all_meals(t_philo **ph, t_args *d, size_t i)
+{
+	pthread_mutex_lock(&ph[i]->mtx_eat_done);
+	if (ph[i]->eating_done == TRUE)
+	{
+		ph[i]->eating_done = TRUE_VERIFYED;
+		d->all_eaten++;
+		if (d->all_eaten == d->nb_philos)
+		{
+			pthread_mutex_unlock(&ph[i]->mtx_eat_done);
+			ft_stop_the_game(ph, d);
+			pthread_mutex_lock(&d->mtx_finish_dinner);
+			d->finish_dinner = TRUE;
+			pthread_mutex_unlock(&d->mtx_finish_dinner);
+			return (TRUE);
+		}
+	}
+	pthread_mutex_unlock(&ph[i]->mtx_eat_done);
+	return (FALSE);
+}
+int	ft_mtx_set_if_have_philo_died(t_philo **ph, t_args *d, size_t i)
+{
+	usleep(10);
+	pthread_mutex_lock(&ph[i]->mtx_philo);
+	if (ft_get_time() - ph[i]->last_meal > d->time_to_die)
+	{
+		pthread_mutex_unlock(&ph[i]->mtx_philo);
+		pthread_mutex_lock(&d->mtx_died);
+		d->is_died = TRUE;
+		pthread_mutex_unlock(&d->mtx_died);
+		ft_stop_the_game(ph, d);
+		printf("%zu\t%zu died\n", ft_get_time() - d->start_time, i + 1);
+		pthread_mutex_lock(&d->mtx_finish_dinner);
+		d->finish_dinner = TRUE;
+		pthread_mutex_unlock(&d->mtx_finish_dinner);
+		return (TRUE);
+	}
+	pthread_mutex_unlock(&ph[i]->mtx_philo);
+	return (FALSE);
+}
+void	*ft_monitor(void *arg)
+{
+	t_args	*d;
+	t_philo	**ph;
+	size_t	i;
+	d = (t_args *)arg;
+	ph = (t_philo **)d->ph;
+	i = 0;
+	while (1)
+	{
+		if (d->nb_must_eat < 1)
+			;
+		else if (ft_mtx_all_philos_eaten_all_meals(ph, d, i) == TRUE)
+			break ;
+		if (ft_mtx_set_if_have_philo_died(ph, d, i) == TRUE)
+			break ;
+		i = (i + 1) % d->nb_philos;
+	}
+	return (NULL);
+}
+
+
+// ========== ./51_mtx_have_died_philo.c ==========
+
+#include "philo.h"
+int	ft_mtx_have_died_philo(t_philo *ph)
+{
+	pthread_mutex_lock(&ph->d->mtx_died);
+	if (ph->d->is_died == TRUE)
+	{
+		pthread_mutex_unlock(&ph->d->mtx_died);
+		return (TRUE);
+	}
+	pthread_mutex_unlock(&ph->d->mtx_died);
+	return (FALSE);
+}
+
+
+// ========== ./52_mtx_log.c ==========
+
+#include "philo.h"
+static void	ft_print_tab(size_t n_philos)
+{
+	size_t	i;
+	i = 0;
+	while (i < n_philos)
+	{
+		printf("\t\t\t\t");
+		i++;
+	}
+}
+void	ft_log(t_philo *ph, char *what_are_doing, size_t n_philos)
+{
+	size_t	actual_time;
+	actual_time = 0;
+	pthread_mutex_lock(&ph->d->mtx_died);
+	if (ph->d->is_died == FALSE)
+	{
+		pthread_mutex_unlock(&ph->d->mtx_died);
+		pthread_mutex_lock(&ph->d->mtx_log);
+		if (TAB == 1)
+			ft_print_tab(n_philos);
+		actual_time = ft_get_time() - ph->d->start_time;
+		printf("%zu\t%d %s\n", actual_time, ph->id, what_are_doing);
+		pthread_mutex_unlock(&ph->d->mtx_log);
+		return ;
+	}
+	pthread_mutex_unlock(&ph->d->mtx_died);
+}
+
+
+// ========== ./59_mtx_fts_usleep_and_get_time.c ==========
+
+#include "philo.h"
+size_t	ft_get_time(void)
+{
+	struct timeval	time;
+	if (gettimeofday(&time, NULL) == -1)
+		printf("gettimeofday() function error!\n");
+	return (time.tv_sec * 1000 + time.tv_usec / 1000);
+}
+void	ft_usleep(size_t ms_time)
+{
+	size_t	time;
+	time = ft_get_time();
+	while (ft_get_time() - time < ms_time)
+		usleep(500);
+}
+int	ft_mtx_is_usleep_loop_done(t_philo *ph, size_t ms_time)
+{
+	size_t	time;
+	size_t	end_time;
+	time = ft_get_time();
+	end_time = time + ms_time;
+	while (time < end_time)
+	{
+		ft_usleep(1);
+		time = ft_get_time();
+		if (ft_mtx_have_died_philo(ph) == TRUE)
+			return (FALSE);
+	}
+	return (TRUE);
+}
+
+
+// ========== ./61_stop_the_game.c ==========
+
+#include "philo.h"
+void	ft_stop_the_game(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	i = 0;
+	while (i < d->nb_philos)
+	{
+		pthread_join(ph[i]->td, NULL);
+		i++;
+	}
+}
+
+
+// ========== ./71_mutex_init_and_destroy.c ==========
+
+#include "philo.h"
+int	ft_mutex_init(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	i = 0;
+	(void)ph;
+	d->mtx_fork = (pthread_mutex_t *)
+		malloc(sizeof(pthread_mutex_t) * d->nb_philos);
+	if (!d->mtx_fork)
+		return (FALSE);
+	while (i < d->nb_philos)
+	{
+		pthread_mutex_init(&d->mtx_fork[i], NULL);
+		pthread_mutex_init(&ph[i]->mtx_philo, NULL);
+		pthread_mutex_init(&ph[i]->mtx_eat_done, NULL);
+		i++;
+	}
+	pthread_mutex_init(&d->mtx_log, NULL);
+	pthread_mutex_init(&d->mtx_died, NULL);
+	pthread_mutex_init(&d->mtx_finish_dinner, NULL);
+	pthread_mutex_init(&d->mtx_all_tds_running, NULL);
+	return (TRUE);
+}
+int	ft_mutex_destroy(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	(void)ph;
+	i = d->nb_philos;
+	while (i-- > 0)
+	{
+		pthread_mutex_destroy(&d->mtx_fork[i]);
+		pthread_mutex_destroy(&ph[i]->mtx_philo);
+		pthread_mutex_destroy(&ph[i]->mtx_eat_done);
+	}
+	free (d->mtx_fork);
+	pthread_mutex_destroy(&d->mtx_log);
+	pthread_mutex_destroy(&d->mtx_died);
+	pthread_mutex_destroy(&d->mtx_finish_dinner);
+	pthread_mutex_destroy(&d->mtx_all_tds_running);
+	return (TRUE);
+}
+
+
+// ========== ./81_utils.c ==========
+
+#include "philo.h"
+int	ft_isdigit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return (1);
+	return (0);
+}
+size_t	ft_atol_positive(const char *nptr)
+{
+	int		i;
+	size_t	num;
+	i = 0;
+	num = 0;
+	while (nptr[i] && nptr[i] == '+')
+		i++;
+	while (nptr[i] && nptr[i] >= '0' && nptr[i] <= '9')
+		num = num * 10 + nptr[i++] - '0';
+	return (num);
+}
+void	ft_print_user_manual(void)
+{
+	printf("\nTo start the dinner, use between FOUR or FIVE arguments.\n");
+	printf("Fifth argument is optional.\n");
+	printf("Do not use negative numbers, or above INT_MAX.\n");
+	printf("Arguments description:\n");
+	printf("[0] prog_name\n");
+	printf("[1] number_of_philos\n");
+	printf("[2] time_to_die\n");
+	printf("[3] time_to_eat\n");
+	printf("[4] time_to_sleep\n");
+	printf("[5] number_of_times_each_philosopher_must_eat\n\n");
+	printf("Examples (with or without fifth argument:\n");
+	printf("./philo 5 800 200 200 7\n");
+	printf("./philo 2 800 200 200\n\n");
+}
+
+
+// ========== ./91_free_and_cleanup.c ==========
+
+#include "philo.h"
+int	ft_free_philo_mem(t_philo **ph, t_args *d)
+{
+	size_t	i;
+	i = 0;
+	while (i < d->nb_philos)
+	{
+		free(ph[i]);
+		i++;
+	}
+	free(ph);
+	return (TRUE);
+}
